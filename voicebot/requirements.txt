@@ -1,0 +1,24 @@
+# Web framework
+fastapi
+uvicorn
+
+# LangChain + Ecosystem
+langchain
+langchain-community
+langchain-openai
+langchain-core
+
+# OpenAI API
+openai
+
+# Audio & speech
+pydub
+soundfile
+
+# Database (SQLite is built-in, but SQLAlchemy may be useful)
+sqlalchemy
+
+# Utilities
+python-multipart  # for handling FormData (audio upload)
+requests
+bs4
