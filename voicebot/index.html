@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Audio RAG Voicebot</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      background-color: #f4f4f4;
+      margin: 0;
+    }
+
+    .container {
+      background-color: #fff;
+      padding: 30px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      text-align: center;
+      width: 90%;
+      max-width: 600px;
+    }
+
+    button {
+      padding: 12px 25px;
+      margin: 10px;
+      font-size: 16px;
+      cursor: pointer;
+      border: none;
+      border-radius: 5px;
+      transition: background-color 0.3s ease;
+    }
+
+    #startButton {
+      background-color: #4caf50;
+      color: white;
+    }
+
+    #startButton:hover {
+      background-color: #45a049;
+    }
+
+    #stopButton {
+      background-color: #f44336;
+      color: white;
+      opacity: 0.6; /* Initially disabled */
+      cursor: not-allowed;
+    }
+
+    #stopButton:hover:not([disabled]) {
+      background-color: #da190b;
+    }
+
+    #stopButton[disabled] {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    #status {
+      margin-top: 20px;
+      font-size: 1.1em;
+      color: #333;
+    }
+
+    #audioPlayback {
+      margin-top: 20px;
+      width: 100%;
+      /* Hide the audio player if you want an invisible player */
+      /* display: none; */
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Audio RAG Voicebot</h1>
+    <p>Click "Start Recording" to speak.</p>
+
+    <button id="startButton">Start Recording</button>
+    <button id="stopButton" disabled>Stop Recording</button>
+
+    <div id="status">Ready.</div>
+    <audio id="audioPlayback" controls></audio>
+  </div>
+
+  <script>
+    const startButton = document.getElementById("startButton");
+    const stopButton = document.getElementById("stopButton");
+    const statusDiv = document.getElementById("status");
+    const audioPlayback = document.getElementById("audioPlayback");
+
+    let mediaRecorder;
+    let audioChunks = [];
+
+    // --- Constants ---
+    const FASTAPI_ENDPOINT = "http://127.0.0.1:8000/query_audio/";
+
+    // Update status messages
+    function updateStatus(message, color = "black") {
+      statusDiv.textContent = message;
+      statusDiv.style.color = color;
+    }
+
+    // Enable/Disable Buttons
+    function setRecordingButtonsState(recording) {
+      startButton.disabled = recording;
+      stopButton.disabled = !recording;
+      stopButton.style.opacity = recording ? 1 : 0.6;
+      stopButton.style.cursor = recording ? "pointer" : "not-allowed";
+    }
+
+    // --- Start Recording ---
+    startButton.addEventListener("click", async () => {
+      updateStatus("Requesting microphone access...");
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream);
+        audioChunks = []; // Clear previous recordings
+        audioPlayback.src = ""; // Clear previous audio
+
+        mediaRecorder.ondataavailable = (event) => {
+          audioChunks.push(event.data);
+        };
+
+        mediaRecorder.onstop = async () => {
+          const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
+          updateStatus("Recording stopped. Sending to API...");
+          setRecordingButtonsState(false);
+          sendAudioToAPI(audioBlob);
+          stream.getTracks().forEach((track) => track.stop());
+        };
+
+        mediaRecorder.start();
+        updateStatus('Recording... Click "Stop Recording" when done.', "green");
+        setRecordingButtonsState(true);
+      } catch (err) {
+        updateStatus(
+          `Error accessing microphone: ${err.message}. Please ensure microphone is connected and permissions are granted.`,
+          "red"
+        );
+        console.error("Error accessing microphone:", err);
+      }
+    });
+
+    // --- Stop Recording ---
+    stopButton.addEventListener("click", () => {
+      if (mediaRecorder && mediaRecorder.state === "recording") {
+        mediaRecorder.stop();
+      }
+    });
+
+    // --- Send Audio to FastAPI ---
+    async function sendAudioToAPI(blob) {
+      const formData = new FormData();
+      formData.append("audio_file", blob, "recording.webm");
+
+      try {
+        const response = await fetch(FASTAPI_ENDPOINT, {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(
+            `HTTP error! status: ${response.status}, message: ${errorText}`
+          );
+        }
+
+        const contentType = response.headers.get("Content-Type");
+
+        if (contentType && contentType.includes("audio/mpeg")) {
+          updateStatus("Received audio response. Playing...", "blue");
+          const audioBlobResponse = await response.blob();
+          const audioUrl = URL.createObjectURL(audioBlobResponse);
+          audioPlayback.src = audioUrl;
+          audioPlayback.play();
+
+          audioPlayback.onended = () => {
+            updateStatus("Ready.");
+            URL.revokeObjectURL(audioUrl);
+          };
+        } else {
+          updateStatus(
+            `Unexpected response content type: ${contentType}`,
+            "orange"
+          );
+          console.error("Unexpected response:", response);
+        }
+      } catch (error) {
+        updateStatus(
+          `Error sending audio or receiving response: ${error.message}`,
+          "red"
+        );
+        console.error("API call error:", error);
+      }
+    }
+  </script>
+</body>
+</html>
